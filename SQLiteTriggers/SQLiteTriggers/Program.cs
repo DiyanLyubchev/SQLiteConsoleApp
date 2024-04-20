@@ -6,10 +6,10 @@ string indexName = $"{tableName}_IDX";
 SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
 
 //Replace path
-string path = "";
+string path = @"..............................\SQLiteTriggers";
 SqliteConnectionStringBuilder connectionStringBuilder = new()
 {
-    DataSource = $"{path}\\SQLiteTriggers\\Data.db",
+    DataSource = Path.Combine(path, "Data.db"),
     Mode = SqliteOpenMode.ReadWriteCreate,
     Cache = SqliteCacheMode.Shared
 };
@@ -20,18 +20,31 @@ using SqliteTransaction transaction = connection.BeginTransaction();
 
 try
 {
-    List<string> columns = ["ID", "MODEL", "BRAND"];
+    bool seedDate = false;
+    bool testColumn = false;
+    bool testIndex = false;
+
+    List<string> tableColumns = ["ID_NUM", "MODEL", "BRAND"];
     List<string> indxColumns = ["MODEL", "BRAND"];
-    // List<string> indxColumns = ["MODEL"];
+
+    if (testColumn)
+    {
+        tableColumns = ["ID_NUM", "MODEL", "BRAND", "PESHO"];
+    }
+
+    if (testIndex)
+    {
+        indxColumns = ["MODEL"];
+    }
 
     string query = $@"CREATE TABLE IF NOT EXISTS {tableName} (
-                    ID_NUM INTEGER PRIMARY KEY,
-                    {string.Join(" TEXT,", columns)} TEXT
+                    ID INTEGER PRIMARY KEY,
+                    {string.Join(" TEXT,", tableColumns)} TEXT
         ); 
 
                    CREATE TABLE IF NOT EXISTS BACKUP_{tableName} (
-                    ID_NUM INTEGER PRIMARY KEY,
-                    {string.Join(" TEXT,", columns)} TEXT
+                    ID INTEGER PRIMARY KEY,
+                    {string.Join(" TEXT,", tableColumns)} TEXT
         ); 
 
         CREATE TRIGGER IF NOT EXISTS {tableName}_POPULATE_ID
@@ -39,8 +52,8 @@ try
         FOR EACH ROW
         BEGIN
             UPDATE {tableName}
-            SET ID = 'U_' || NEW.ID_NUM
-            WHERE ID_NUM = NEW.ID_NUM;
+            SET ID_NUM = 'U_' || NEW.ID
+            WHERE ID = NEW.ID;
         END;
     ;";
 
@@ -55,23 +68,35 @@ try
     command.CommandText = indexQuery;
     command.ExecuteNonQuery();
 
-    CreateBackupTrigger(columns, connection);
+    CreateBackupTrigger(tableColumns, connection);
 
-    if (GetIndexColumns().Count != indxColumns.Count)
+    if (GetTableColumns(connection).Count < tableColumns.Count)
+    {
+        AddColumnIfMissing(tableColumns, connection);
+    }
+
+    if (GetIndexColumns(connection).Count > indxColumns.Count)
     {
         RemoveDuplicateRecords(indxColumns, connection);
     }
 
-    for (int i = 0; i < 4; i++)
+    if (seedDate)
     {
-        Dictionary<string, string> newData = new()
+        int initialRecords = GetRecordCount(connection);
+        int countToInsert = initialRecords + 4;
+        for (int i = initialRecords; i < countToInsert; i++)
         {
-            { "MODEL", "SomeModel" },
-            { "BRAND", $"SomeBrand{i}" }
-        };
+            Dictionary<string, string> newData = new()
+            {
+                 { "MODEL", "SomeModel" },
+                 { "BRAND", $"SomeBrand{i + 1}" }
+            };
 
-        InsertData(newData, indxColumns, connection);
+            InsertData(newData, indxColumns, connection);
+        }
+        Console.WriteLine($"Insert: {GetRecordCount(connection) - initialRecords} records into table: {tableName}");
     }
+
 }
 catch (Exception ex)
 {
@@ -157,9 +182,9 @@ void RemoveDuplicateRecords(List<string> udatPriIndex, SqliteConnection connecti
     }
 }
 
-List<string> GetIndexColumns()
+List<string> GetIndexColumns(SqliteConnection connection)
 {
-    List<string> indexColumns = new();
+    List<string> columns = [];
 
     using SqliteCommand command = connection.CreateCommand();
 
@@ -169,8 +194,57 @@ List<string> GetIndexColumns()
     while (reader.Read())
     {
         string columnName = reader["name"].ToString();
-        indexColumns.Add(columnName);
+        columns.Add(columnName);
     }
 
-    return indexColumns;
+    return columns;
+}
+
+List<string> GetTableColumns(SqliteConnection connection)
+{
+    List<string> columns = [];
+
+    using SqliteCommand command = connection.CreateCommand();
+
+    command.CommandText = $"PRAGMA table_info({tableName})";
+    using SqliteDataReader reader = command.ExecuteReader();
+    while (reader.Read())
+    {
+        string columnName = reader["name"].ToString();
+        if (!columnName.ToUpper().Equals("ID", StringComparison.OrdinalIgnoreCase))
+        {
+            columns.Add(columnName);
+        }
+    }
+
+    return columns;
+}
+
+void AddColumnIfMissing(List<string> columns, SqliteConnection connection)
+{
+    List<string> existingColumns = GetTableColumns(connection);
+
+    List<string> columnsToAdd = columns.Except(existingColumns).ToList();
+    Console.WriteLine($"Update table: {tableName} with columns: {string.Join(',', columnsToAdd)}");
+    foreach (string column in columnsToAdd)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {column} TEXT";
+        command.ExecuteNonQuery();
+    }
+}
+
+int GetRecordCount(SqliteConnection connection)
+{
+    using SqliteCommand command = connection.CreateCommand();
+
+    command.CommandText = $"SELECT COUNT(*) FROM {tableName}";
+
+    object result = command.ExecuteScalar();
+    if (result != null && result != DBNull.Value)
+    {
+        return Convert.ToInt32(result);
+    }
+
+    return 0;
 }
