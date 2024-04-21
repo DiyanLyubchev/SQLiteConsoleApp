@@ -21,13 +21,14 @@ namespace SQLiteTriggers
 
         internal void CreateInitialTabels(List<string> tableColumns, List<string> indxColumns)
         {
-            string query = $@"CREATE TABLE IF NOT EXISTS {tableName} (
+            string query = $@"
+                 CREATE TABLE IF NOT EXISTS {tableName} (
                     ID INTEGER PRIMARY KEY,
                              {string.Join(" TEXT,", tableColumns)} TEXT
                  ); 
              
-                            CREATE TABLE IF NOT EXISTS {backupTableName} (
-                             ID INTEGER PRIMARY KEY,
+                  CREATE TABLE IF NOT EXISTS {backupTableName} (
+                    ID INTEGER PRIMARY KEY,
                              {string.Join(" TEXT,", tableColumns)} TEXT
                  ); 
              
@@ -53,8 +54,9 @@ namespace SQLiteTriggers
             command.ExecuteNonQuery();
         }
 
-        internal void CreateBackupTrigger(List<string> columnNames)
+        internal void CreateBackupTrigger()
         {
+            List<string> columnNames = GetTableColumns(backupTableName, true);
             string columns = string.Join(",", columnNames);
 
             List<string> valuePlaceholders = columnNames.Select(column => $"OLD.{column}").ToList();
@@ -87,7 +89,6 @@ namespace SQLiteTriggers
 
         internal void InsertData(Dictionary<string, string> data, List<string> indexColumns)
         {
-
             List<string> columns = new(data.Keys);
 
             List<string> parameters = new();
@@ -150,7 +151,7 @@ namespace SQLiteTriggers
             return columns;
         }
 
-        internal List<string> GetTableColumns(string tableName)
+        internal List<string> GetTableColumns(string tableName, bool includePrimaryKey = false)
         {
             List<string> columns = [];
 
@@ -162,17 +163,17 @@ namespace SQLiteTriggers
             {
                 string columnName = reader["name"].ToString();
                 if (!columnName.ToUpper().Equals("ID", StringComparison.OrdinalIgnoreCase))
-                {
                     columns.Add(columnName);
-                }
+
+                else if(includePrimaryKey)
+                    columns.Add(columnName);
             }
 
             return columns;
         }
 
-        internal void AddColumnIfMissing(List<string> columns, List<string> existingDbColumns, string tableName)
+        internal void AddColumnIfMissing(List<string> columnsToAdd, string tableName)
         {
-            List<string> columnsToAdd = columns.Except(existingDbColumns).ToList();
             Console.WriteLine($"Update table: {tableName} with columns: {string.Join(',', columnsToAdd)}");
             foreach (string column in columnsToAdd)
             {

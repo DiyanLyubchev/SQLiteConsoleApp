@@ -23,7 +23,7 @@ try
 {
     bool seedDate = false;
     bool testColumn = false;
-    bool testIndex = true;
+    bool testIndex = false;
     DbService dbService = new(connection, tableName, backupTableName);
 
     List<string> tableColumns = ["ID_NUM", "MODEL", "BRAND"];
@@ -41,20 +41,24 @@ try
 
     dbService.CreateInitialTabels(tableColumns, indxColumns);
 
-    dbService.CreateBackupTrigger(tableColumns);
+    dbService.CreateBackupTrigger();
 
     List<string> existingDbColumns = dbService.GetTableColumns(tableName);
-    if (existingDbColumns.Count < tableColumns.Count)
+    List<string> columnsToAdd = tableColumns.Except(existingDbColumns).ToList();
+
+    if (columnsToAdd.Count > 0)
     {
-        dbService.AddColumnIfMissing(tableColumns, existingDbColumns, tableName);
+        dbService.AddColumnIfMissing(columnsToAdd, tableName);
     }
 
     List<string> existingBackDbColumns = dbService.GetTableColumns(backupTableName);
-    if (existingBackDbColumns.Count < tableColumns.Count)
+    columnsToAdd = tableColumns.Except(existingBackDbColumns).ToList();
+
+    if (columnsToAdd.Count > 0)
     {
-        dbService.AddColumnIfMissing(tableColumns, existingBackDbColumns, backupTableName);
+        dbService.AddColumnIfMissing(columnsToAdd, backupTableName);
         dbService.DropTrigger();
-        dbService.CreateBackupTrigger(tableColumns);
+        dbService.CreateBackupTrigger();
     }
 
     if (dbService.GetIndexColumns().Count > indxColumns.Count)
