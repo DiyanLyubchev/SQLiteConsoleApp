@@ -1,13 +1,14 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using Microsoft.Data.Sqlite;
 using SQLiteTriggers;
+using System;
 string tableName = "ABC";
 string backupTableName = $"BACKUP_{tableName}";
 
 SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
 
 //Replace path
-string path = @"......\SQLiteTriggers";
+string path = @".....\SQLiteTriggers";
 SqliteConnectionStringBuilder connectionStringBuilder = new()
 {
     DataSource = Path.Combine(path, "Data.db"),
@@ -26,12 +27,12 @@ try
     bool testIndex = false;
     DbService dbService = new(connection, tableName, backupTableName);
 
-    List<string> tableColumns = ["ID_NUM", "MODEL", "BRAND"];
+    List<string> tableColumns = ["ID_NUM", "ACTIVE", "MODEL", "BRAND"];
     List<string> indxColumns = ["MODEL", "BRAND"];
 
     if (testColumn)
     {
-        tableColumns = ["ID_NUM", "MODEL", "BRAND", "PESHO"];
+        tableColumns = ["ID_NUM", "ACTIVE", "MODEL", "BRAND", "PESHO"];
     }
 
     if (testIndex)
@@ -70,12 +71,16 @@ try
     {
         int initialRecords = dbService.GetRecordCount();
         int countToInsert = initialRecords + 4;
+        string date = DateTime.Now.ToString("yyMMdd");  
+        
         for (int i = initialRecords; i < countToInsert; i++)
         {
             Dictionary<string, string> newData = new()
             {
+                 { "ACTIVE", $"{date}" },
                  { "MODEL", "SomeModel" },
                  { "BRAND", $"SomeBrand{i + 1}" }
+
             };
 
             dbService.InsertData(newData, indxColumns);

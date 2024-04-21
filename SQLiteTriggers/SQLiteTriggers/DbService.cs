@@ -87,8 +87,9 @@ namespace SQLiteTriggers
             command.ExecuteNonQuery();
         }
 
-        internal void InsertData(Dictionary<string, string> data, List<string> indexColumns)
+        internal void InsertData(Dictionary<string, string> data, List<string> indexColumns, bool useUpdateQuery = false)
         {
+            string date = DateTime.Now.ToString("yyMMdd");
             List<string> columns = new(data.Keys);
 
             List<string> parameters = new();
@@ -97,10 +98,26 @@ namespace SQLiteTriggers
                 parameters.Add($"@{column}");
             }
 
-            string query = $"INSERT INTO {tableName} ({string.Join(",", columns)}) VALUES ({string.Join(",", parameters)}) ON CONFLICT({string.Join(",", indexColumns)}) DO NOTHING";
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = query;
+            string queryNothing = $@"INSERT INTO {tableName} ({string.Join(",", columns)})
+                                            VALUES ({string.Join(",", parameters)})
+                                            ON CONFLICT({string.Join(",", indexColumns)}) 
+                                            DO NOTHING";
 
+            if (useUpdateQuery)
+            {
+                queryNothing = $@"INSERT INTO {tableName} ({string.Join(",", columns)})
+                                           VALUES ({string.Join(",", parameters)})
+                                           ON CONFLICT({string.Join(",", indexColumns)}) 
+                                           DO UPDATE SET ACTIVE = @Date";
+            }
+
+
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = queryNothing;
+
+            if (useUpdateQuery)
+                command.Parameters.AddWithValue("@Date", date);
+            
             foreach (var kvp in data)
             {
                 command.Parameters.AddWithValue($"@{kvp.Key}", kvp.Value);
@@ -165,7 +182,7 @@ namespace SQLiteTriggers
                 if (!columnName.ToUpper().Equals("ID", StringComparison.OrdinalIgnoreCase))
                     columns.Add(columnName);
 
-                else if(includePrimaryKey)
+                else if (includePrimaryKey)
                     columns.Add(columnName);
             }
 
