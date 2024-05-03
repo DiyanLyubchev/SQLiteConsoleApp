@@ -31,11 +31,7 @@ string currentDirectory = Directory.GetCurrentDirectory();
 string pathToDbFile = Path.Combine(currentDirectory, "..\\..\\..\\Data.db");
 string pathToIportDataFile = Path.Combine(currentDirectory, "..\\..\\..\\ImportData.csv");
 
-if (!File.Exists(pathToIportDataFile) || !File.Exists(pathToDbFile))
-{
-    Console.WriteLine("The file/s not exist into provided location!");
-    Environment.Exit(1);
-}
+ValidateFile(pathToIportDataFile);
 
 SqliteConnectionStringBuilder connectionStringBuilder = new()
 {
@@ -46,6 +42,9 @@ SqliteConnectionStringBuilder connectionStringBuilder = new()
 
 using SqliteConnection connection = new(connectionStringBuilder.ConnectionString);
 connection.Open();
+
+ValidateFile(pathToDbFile);
+
 DbService dbService = new(connection, tableName, backupTableName);
 
 if (!dbService.TableExists(tempTableName) && !dbService.TableExists(tableName))
@@ -108,5 +107,11 @@ catch (Exception ex)
 transaction.Commit();
 Console.WriteLine($"Successfully process");
 
-
-
+static void ValidateFile(string pathToIportDataFile)
+{
+    if (!File.Exists(pathToIportDataFile))
+    {
+        Console.WriteLine("The file not exist into provided location!");
+        Environment.Exit(1);
+    }
+}
