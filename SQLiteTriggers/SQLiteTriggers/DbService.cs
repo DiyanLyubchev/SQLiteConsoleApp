@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.Sqlite;
+using System.Windows.Input;
 
 namespace SQLiteTriggers;
 
@@ -89,12 +90,102 @@ internal class DbService
         command.ExecuteNonQuery();
     }
 
-    internal void InsertData(Dictionary<string, string> data, List<string> indexColumns, bool useUpdateQuery = false)
+    internal string InsertData(Dictionary<string, string> data, IEnumerable<string> indexColumns)
+    {
+        string columns = string.Join(",", data.Keys);
+        string parameterNames = string.Join(",", data.Keys.Select(x => $"@{x}"));
+
+        var parameters = data.Select(x =>
+        {//TODO: Checking for null values and set parameters 
+            var value = string.IsNullOrEmpty(x.Value) ? DBNull.Value : (object)x.Value;
+            return new SqliteParameter($"@{x.Key}", value);
+        }).ToArray();
+
+        string whereClause = string.Join(" AND ", indexColumns.Select(col =>
+        {
+            string columnCheck;
+            if (data.TryGetValue(col, out string value))
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    columnCheck = $"{col} IS NULL";
+                }
+                else
+                {
+                    columnCheck = $"{col} = @{col}"; 
+                }
+            }
+            else
+            {
+                columnCheck = $"{col} IS NULL";
+            }
+
+            return columnCheck;
+        }));
+
+        string date = DateTime.Now.ToString("yyMMdd");
+
+        using SqliteCommand insertCommand = connection.CreateCommand();
+        insertCommand.CommandText = $@"INSERT INTO {this.tableName} ({columns}) 
+                                  SELECT {columns} FROM {this.backupTableName} WHERE {whereClause} 
+                                  LIMIT (
+                                         CASE WHEN (SELECT COUNT(*) FROM {this.tableName} WHERE {whereClause}) > 0 
+                                              THEN 0 
+                                              ELSE 1 
+                                         END);";
+
+        insertCommand.Parameters.AddRange(parameters);
+
+        if (insertCommand.ExecuteNonQuery() > 0)
+        {
+            using SqliteCommand deleteCommand = connection.CreateCommand();
+            deleteCommand.CommandText = $@"DELETE FROM {this.backupTableName} 
+                                    WHERE rowid IN (
+                                                    SELECT rowid FROM {this.backupTableName} 
+                                                    WHERE {whereClause} LIMIT 1);";
+
+            deleteCommand.Parameters.AddRange(parameters);
+            deleteCommand.ExecuteNonQuery();
+        }
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $@"INSERT INTO {this.tableName} ({columns})
+                                 SELECT {parameterNames}
+                                 WHERE NOT EXISTS (
+                                     SELECT 1 FROM {this.tableName} WHERE {whereClause}
+                                 ) AND NOT EXISTS (
+                                     SELECT 1 FROM {this.backupTableName} WHERE {whereClause}
+                                 );
+                                 
+                                 SELECT CASE WHEN CHANGES() > 0 THEN LAST_INSERT_ROWID() ELSE 0 END;";
+
+        command.Parameters.AddRange(parameters);
+        string upsertedId = $"U_{command.ExecuteScalar()}";
+
+        if (upsertedId == "U_0")
+        {
+            using SqliteCommand updateCommand = connection.CreateCommand();
+            updateCommand.CommandText = $@"UPDATE {this.tableName} 
+                                           SET active = @Date
+                                           WHERE {whereClause} 
+                                           RETURNING ID_NUM;";
+
+            updateCommand.Parameters.AddRange(parameters);
+            updateCommand.Parameters.AddWithValue("@Date", date);
+
+            upsertedId = updateCommand.ExecuteScalar().ToString();
+        }
+
+        return upsertedId;
+    }
+
+    [Obsolete("The new one is created!")]
+    internal void InsertData(Dictionary<string, string> data, IEnumerable<string> indexColumns, bool useUpdateQuery)
     {
         string date = DateTime.Now.ToString("yyMMdd");
         List<string> columns = new(data.Keys);
 
-        List<string> parameters = new();
+        List<string> parameters = [];
         foreach (var column in columns)
         {
             parameters.Add($"@{column}");
