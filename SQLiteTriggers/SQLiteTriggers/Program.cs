@@ -9,7 +9,7 @@ bool isNeedToSyncTempandMainTables = false;
 
 SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
 //Variables for testing
-bool seedRandomDate = true;
+bool seedRandomDate = false;
 int countToInsert = 10;
 bool testColumn = false;
 bool testIndex = false;
@@ -24,7 +24,8 @@ if (testColumn)
 
 if (testIndex)
 {
-    indxColumns = ["MODEL"];
+    indxColumns = ["MODEL", "BRAND", "PESHO"];
+    //indxColumns = ["MODEL"];
 }
 
 string currentDirectory = Directory.GetCurrentDirectory();
@@ -62,8 +63,8 @@ if (!dbService.TableExists(tempTableName) && !dbService.TableExists(tableName))
 using SqliteTransaction transaction = connection.BeginTransaction();
 try
 {
-    dbService.CreateInitialTabels(tempTableName, indxColumns);
-
+    dbService.CreateInitialTabels(tempTableName);
+    dbService.CreateIndex(indxColumns);
     dbService.CreateBackupTrigger();
 
     if (isNeedToSyncTempandMainTables)
@@ -77,8 +78,8 @@ try
         dbService.AddColumnIfMissing(columnsToAdd, tableName);
     }
 
-    List<string> existingBackDbColumns = dbService.GetTableColumns(backupTableName);
-    columnsToAdd = tableColumns.Except(existingBackDbColumns).ToList();
+    List<string> existingBackUpDbColumns = dbService.GetTableColumns(backupTableName);
+    columnsToAdd = tableColumns.Except(existingBackUpDbColumns).ToList();
 
     if (columnsToAdd.Count > 0)
     {
@@ -87,9 +88,17 @@ try
         dbService.CreateBackupTrigger();
     }
 
-    if (dbService.GetIndexColumns().Count > indxColumns.Count)
+    int indexColumnsCount = dbService.GetIndexColumns().Count;
+    if (indexColumnsCount != indxColumns.Count)
     {
-        dbService.RemoveDuplicateRecords(indxColumns);
+        Console.WriteLine($"Update index");
+        if (indexColumnsCount > indxColumns.Count)
+        {
+            dbService.RemoveDuplicateRecords(indxColumns);
+        }
+
+        dbService.DropIndex();
+        dbService.CreateIndex(indxColumns);
     }
 
     if (seedRandomDate)

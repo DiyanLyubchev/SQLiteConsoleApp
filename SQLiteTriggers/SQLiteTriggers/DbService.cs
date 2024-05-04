@@ -1,5 +1,4 @@
 ﻿using Microsoft.Data.Sqlite;
-using System.Windows.Input;
 
 namespace SQLiteTriggers;
 
@@ -20,26 +19,30 @@ internal class DbService
         this.backupTrigger = $"{tableName}_BACKUP_DELETED";
     }
 
-    internal void CreateInitialTabels(string tempTableName, List<string> indxColumns)
+    /// <summary>
+    /// Table operations
+    /// </summary>
+    /// <param name="tempTableName"></param>
+    internal void CreateInitialTabels(string tempTableName)
     {
         List<string> tableColumns = GetTableColumns(tempTableName);
 
         string query = $@"
-                 CREATE TABLE IF NOT EXISTS {tableName} (
+                 CREATE TABLE IF NOT EXISTS {this.tableName} (
                     ID INTEGER PRIMARY KEY,
                              {string.Join(" TEXT,", tableColumns)} TEXT
                  ); 
              
-                  CREATE TABLE IF NOT EXISTS {backupTableName} (
+                  CREATE TABLE IF NOT EXISTS {this.backupTableName} (
                     ID INTEGER PRIMARY KEY,
                              {string.Join(" TEXT,", tableColumns)} TEXT
                  ); 
              
-                 CREATE TRIGGER IF NOT EXISTS {tableName}_POPULATE_ID
-                 AFTER INSERT ON {tableName}
+                 CREATE TRIGGER IF NOT EXISTS {this.tableName}_POPULATE_ID
+                 AFTER INSERT ON {this.tableName}
                  FOR EACH ROW
                  BEGIN
-                     UPDATE {tableName}
+                     UPDATE {this.tableName}
                      SET ID_NUM = 'U_' || NEW.ID
                      WHERE ID = NEW.ID;
                  END;
@@ -49,27 +52,103 @@ internal class DbService
 
         command.CommandText = query;
         command.ExecuteNonQuery();
+    }
 
-        string indexQuery = $@"CREATE UNIQUE INDEX IF NOT EXISTS {indexName} 
+    internal List<string> GetTableColumns(string tableName, bool includePrimaryKey = false)
+    {
+        List<string> columns = [];
+
+        using SqliteCommand command = connection.CreateCommand();
+
+        command.CommandText = $"PRAGMA table_info({tableName})";
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string columnName = reader["name"].ToString();
+            if (!columnName.ToUpper().Equals("ID", StringComparison.OrdinalIgnoreCase))
+                columns.Add(columnName);
+
+            else if (includePrimaryKey)
+                columns.Add(columnName);
+        }
+
+        return columns;
+    }
+
+    internal bool TableExists(string tableName)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info('{tableName}');";
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.HasRows;
+    }
+
+    internal void AddColumnIfMissing(List<string> columnsToAdd, string tableName)
+    {
+        Console.WriteLine($"Update table: {tableName} with columns: {string.Join(',', columnsToAdd)}");
+        foreach (string column in columnsToAdd)
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {column} TEXT";
+            command.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Index operations
+    /// </summary>
+    internal void CreateIndex(List<string> indxColumns)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        string indexQuery = $@"CREATE UNIQUE INDEX IF NOT EXISTS {this.indexName} 
                         ON {tableName} ({string.Join(",", indxColumns)});";
 
         command.CommandText = indexQuery;
         command.ExecuteNonQuery();
     }
 
+    internal void DropIndex()
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"DROP INDEX IF EXISTS {this.indexName}";
+        command.ExecuteNonQuery();
+    }
+
+    internal List<string> GetIndexColumns()
+    {
+        List<string> columns = [];
+
+        using SqliteCommand command = connection.CreateCommand();
+
+        command.CommandText = $"PRAGMA index_info({this.indexName})";
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            string columnName = reader["name"].ToString();
+            columns.Add(columnName);
+        }
+
+        return columns;
+    }
+
+
+    /// <summary>
+    /// Trigger operations
+    /// </summary>
     internal void CreateBackupTrigger()
     {
-        List<string> columnNames = GetTableColumns(backupTableName, true);
+        List<string> columnNames = GetTableColumns(this.backupTableName, true);
         string columns = string.Join(",", columnNames);
 
         List<string> valuePlaceholders = columnNames.Select(column => $"OLD.{column}").ToList();
 
         string values = string.Join(",", valuePlaceholders);
 
-        string triggerQuery = $@"CREATE TRIGGER IF NOT EXISTS {backupTrigger}
-                             AFTER DELETE ON {tableName}
+        string triggerQuery = $@"CREATE TRIGGER IF NOT EXISTS {this.backupTrigger}
+                             AFTER DELETE ON {this.tableName}
                              BEGIN
-                                 INSERT INTO {backupTableName} ({columns})
+                                 INSERT INTO {this.backupTableName} ({columns})
                                  VALUES
                                  (
                                      {values}
@@ -86,8 +165,67 @@ internal class DbService
     internal void DropTrigger()
     {
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = $"DROP TRIGGER IF EXISTS {backupTrigger}";
+        command.CommandText = $"DROP TRIGGER IF EXISTS {this.backupTrigger}";
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Process operations
+    /// </summary>
+    internal int GetRecordCount(string tableName)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+
+        command.CommandText = $"SELECT COUNT(*) FROM {tableName}";
+
+        object result = command.ExecuteScalar();
+        if (result != null && result != DBNull.Value)
+        {
+            return Convert.ToInt32(result);
+        }
+
+        return 0;
+    }
+
+    internal void RemoveDuplicateRecords(List<string> udatPriIndex)
+    {
+        string removeDuplicatesQuery = $@"
+             DELETE FROM {tableName}
+             WHERE ROWID NOT IN (
+                 SELECT ROWID
+                 FROM (
+                     SELECT ROWID,
+                            ROW_NUMBER() OVER(PARTITION BY {string.Join(", ", udatPriIndex)} ORDER BY ID_NUM DESC) AS row_num
+                     FROM {tableName}
+                 ) AS ranked
+                 WHERE row_num = 1
+             );";
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = removeDuplicatesQuery;
+        int recordsDeleted = command.ExecuteNonQuery();
+
+        if (recordsDeleted > 0)
+        {
+            Console.WriteLine($"Moved {recordsDeleted} records to {backupTableName} Table");
+        }
+    }
+
+    internal void SyncMainTableWithTemp(string tempTableName)
+    {
+        int initialTempRecords = GetRecordCount(tempTableName);
+        string columns = string.Join(", ", GetTableColumns(tempTableName, true));
+        using SqliteCommand command = connection.CreateCommand();
+
+        command.CommandText = $@"INSERT INTO {this.tableName} ({columns})
+                                        SELECT * FROM {tempTableName};";
+
+        command.ExecuteNonQuery();
+
+        command.CommandText = $"DROP TABLE IF EXISTS {tempTableName}";
+        command.ExecuteNonQuery();
+
+        Console.WriteLine($"Successfully moved {initialTempRecords} records from {tempTableName} into {tableName}");
     }
 
     internal string InsertData(Dictionary<string, string> data, IEnumerable<string> indexColumns)
@@ -112,7 +250,7 @@ internal class DbService
                 }
                 else
                 {
-                    columnCheck = $"{col} = @{col}"; 
+                    columnCheck = $"{col} = @{col}";
                 }
             }
             else
@@ -217,120 +355,6 @@ internal class DbService
         }
 
         command.ExecuteNonQuery();
-    }
-
-    internal void RemoveDuplicateRecords(List<string> udatPriIndex)
-    {
-        string removeDuplicatesQuery = $@"
-             DELETE FROM {tableName}
-             WHERE ROWID NOT IN (
-                 SELECT ROWID
-                 FROM (
-                     SELECT ROWID,
-                            ROW_NUMBER() OVER(PARTITION BY {string.Join(", ", udatPriIndex)} ORDER BY ID_NUM DESC) AS row_num
-                     FROM {tableName}
-                 ) AS ranked
-                 WHERE row_num = 1
-             );";
-
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = removeDuplicatesQuery;
-        int recordsDeleted = command.ExecuteNonQuery();
-
-        if (recordsDeleted > 0)
-        {
-            Console.WriteLine($"Moved {recordsDeleted} records to {backupTableName} Table");
-        }
-    }
-
-    internal List<string> GetIndexColumns()
-    {
-        List<string> columns = [];
-
-        using SqliteCommand command = connection.CreateCommand();
-
-        command.CommandText = $"PRAGMA index_info({indexName})";
-        using SqliteDataReader reader = command.ExecuteReader();
-
-        while (reader.Read())
-        {
-            string columnName = reader["name"].ToString();
-            columns.Add(columnName);
-        }
-
-        return columns;
-    }
-
-    internal List<string> GetTableColumns(string tableName, bool includePrimaryKey = false)
-    {
-        List<string> columns = [];
-
-        using SqliteCommand command = connection.CreateCommand();
-
-        command.CommandText = $"PRAGMA table_info({tableName})";
-        using SqliteDataReader reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            string columnName = reader["name"].ToString();
-            if (!columnName.ToUpper().Equals("ID", StringComparison.OrdinalIgnoreCase))
-                columns.Add(columnName);
-
-            else if (includePrimaryKey)
-                columns.Add(columnName);
-        }
-
-        return columns;
-    }
-
-    internal void AddColumnIfMissing(List<string> columnsToAdd, string tableName)
-    {
-        Console.WriteLine($"Update table: {tableName} with columns: {string.Join(',', columnsToAdd)}");
-        foreach (string column in columnsToAdd)
-        {
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {column} TEXT";
-            command.ExecuteNonQuery();
-        }
-    }
-
-    internal int GetRecordCount(string tableName)
-    {
-        using SqliteCommand command = connection.CreateCommand();
-
-        command.CommandText = $"SELECT COUNT(*) FROM {tableName}";
-
-        object result = command.ExecuteScalar();
-        if (result != null && result != DBNull.Value)
-        {
-            return Convert.ToInt32(result);
-        }
-
-        return 0;
-    }
-
-    internal bool TableExists(string tableName)
-    {
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA table_info('{tableName}');";
-        using SqliteDataReader reader = command.ExecuteReader();
-        return reader.HasRows;
-    }
-
-    internal void SyncMainTableWithTemp(string tempTableName)
-    {
-        int initialTempRecords = GetRecordCount(tempTableName);
-        string columns = string.Join(", ", GetTableColumns(tempTableName, true));
-        using SqliteCommand command = connection.CreateCommand();
-
-        command.CommandText = $@"INSERT INTO {this.tableName} ({columns})
-                                        SELECT * FROM {tempTableName};";
-
-        command.ExecuteNonQuery();
-
-        command.CommandText = $"DROP TABLE IF EXISTS {tempTableName}";
-        command.ExecuteNonQuery();
-
-        Console.WriteLine($"Successfully moved {initialTempRecords} records from {tempTableName} into {tableName}");
     }
 }
 
