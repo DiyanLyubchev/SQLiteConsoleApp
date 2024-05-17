@@ -1,6 +1,11 @@
 ﻿// See https://aka.ms/new-console-template for more information
+using CsvHelper.Configuration;
+using CsvHelper;
 using Microsoft.Data.Sqlite;
 using SQLiteTriggers;
+using System.Globalization;
+using System.Reflection.PortableExecutable;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 string tableName = "ABC";
 string tempTableName = "ABC_TEMP";
@@ -106,6 +111,33 @@ try
     if (seedRandomDate)
     {
         ImportService.SeedRandomData(dbService, indxColumns, tableName, countToInsert);
+    }
+    else
+    {
+        string date = DateTime.Now.ToString("yyMMdd");
+        Dictionary<string, string> newData = [];
+
+        using (StreamReader reader = new(pathToIportDataFile))
+        {
+            CsvConfiguration config = new(CultureInfo.InvariantCulture)
+            {
+                Delimiter = ";",
+                BadDataFound = null
+            };
+
+            using (CsvReader csv = new(reader, config))
+            {
+                csv.Read();
+
+                if (csv.ReadHeader())
+                {
+                    string[] headers = csv.HeaderRecord;
+                }
+            }
+        }
+
+        if (newData.Count != 0)
+            dbService.InsertData(newData, indxColumns);
     }
 }
 catch (Exception ex)

@@ -7,18 +7,18 @@ namespace SQLiteTriggers;
 internal class ImportService
 {
     internal static void ImportDataFromCsv(List<string> indxColumns,
-                                   string indexColumnName,
-                                   List<char> cleanChars,
-                                   string sqliteFilePath,
-                                   string tableName,
-                                   string csvUdatPath)
+                                           string indexColumnName,
+                                           List<char> cleanChars,
+                                           string sqliteFilePath,
+                                           string tableName,
+                                           string csvImportFilePath)
     {
-        string tempUdat = Path.Combine(Path.GetDirectoryName(csvUdatPath), "Temp_Utf8.csv");
+        string tempUdat = Path.Combine(Path.GetDirectoryName(csvImportFilePath), "Temp_Utf8.csv");
         bool isFirstRow = true;
         StringBuilder rowBuilder = new(300000);
         List<string> headers = [];
 
-        using (StreamReader reader = new(csvUdatPath))
+        using (StreamReader reader = new(csvImportFilePath))
         {
             CsvConfiguration config = new(CultureInfo.InvariantCulture)
             {
@@ -45,7 +45,7 @@ internal class ImportService
             indexColumns.Add(headers.IndexOf(currentColumn));
         }
 
-        using (FileStream inputStream = new(csvUdatPath, FileMode.Open, FileAccess.Read))
+        using (FileStream inputStream = new(csvImportFilePath, FileMode.Open, FileAccess.Read))
         using (FileStream outputStream = new(tempUdat, FileMode.Create, FileAccess.Write))
         {
             using StreamReader reader = new(inputStream, Encoding.Unicode);
