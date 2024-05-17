@@ -6,6 +6,8 @@ string tableName = "ABC";
 string tempTableName = "ABC_TEMP";
 string backupTableName = $"BACKUP_{tableName}";
 bool isNeedToSyncTempandMainTables = false;
+string indexColumnName = "INDEX_COLUMN";
+List<char> cleanChars = new() { '^', ' ' };
 
 SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
 //Variables for testing
@@ -52,7 +54,7 @@ if (!dbService.TableExists(tempTableName) && !dbService.TableExists(tableName))
 {
     Console.WriteLine($"Inserting records from csv: {Path.GetFileNameWithoutExtension(pathToIportDataFile)}");
 
-    ImportService.IportCsvFileToSQLite(pathToDbFile, tempTableName, pathToIportDataFile);
+    ImportService.ImportDataFromCsv(indxColumns, indexColumnName, cleanChars, pathToDbFile, tempTableName, pathToIportDataFile);
     int initialRecords = dbService.GetRecordCount(tempTableName);
 
     Console.WriteLine($"Inserted: {initialRecords} records into table: {tempTableName}");
