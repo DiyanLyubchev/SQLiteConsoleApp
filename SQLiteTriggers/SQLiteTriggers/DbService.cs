@@ -341,19 +341,68 @@ internal class DbService
 
     internal void SyncMainTableWithTemp(string tempTableName)
     {
-        int initialTempRecords = GetRecordCount(tempTableName);
         string columns = string.Join(", ", GetTableColumns(tempTableName, true));
+
+        string groupByWhereClause = $"{string.Join(" IS NOT NULL AND ", this.indexColumns)} IS NOT NULL";
+        string selectWhereClause = $"{string.Join(" IS NULL OR ", this.indexColumns)} IS NULL";
+
         using SqliteCommand command = connection.CreateCommand();
 
         command.CommandText = $@"INSERT INTO {this.tableName} ({columns})
-                                        SELECT * FROM {tempTableName};";
+                                         WITH GROUPED_RECORDS AS (
+                                                    SELECT * FROM (
+                                                        SELECT * FROM {tempTableName}
+                                                        WHERE {groupByWhereClause} 
+                                                        GROUP BY {indexColumnName}  
+                                                        HAVING MAX(ID) AND MAX(ENTRY) IS NOT NULL AND MAX(ACTIVE) IS NOT NULL 
+                                                    ) AS GROUPED_RECORDS
+                                                    GROUP BY ID
+                                                   )
+                                                   SELECT * FROM GROUPED_RECORDS
+                                                   UNION
+                                                   SELECT * FROM (
+                                                       SELECT * FROM {tempTableName}
+                                                       WHERE {selectWhereClause}
+                                                   ) AS SECOND_SELECT
+                                                   GROUP BY ID;";
 
         command.ExecuteNonQuery();
 
-        command.CommandText = $"DROP TABLE IF EXISTS {tempTableName}";
-        command.ExecuteNonQuery();
+        Console.WriteLine($"Successfully moved {GetRecordCount(this.tableName)} records from {tempTableName} into {this.tableName}");
+        string backupQuery = $@"
+                            INSERT INTO {this.backupTableName} ({columns})
+                            SELECT * FROM {tempTableName}
+                            WHERE ID NOT IN (
+                                SELECT ID FROM (
+                                    WITH GROUPED_RECORDS AS (
+                                        SELECT ID FROM (
+                                            SELECT ID FROM {tempTableName}
+                                            WHERE {groupByWhereClause}
+                                            GROUP BY {indexColumnName}
+                                            HAVING MAX(ID) AND MAX(ENTRY) IS NOT NULL AND MAX(ACTIVE) IS NOT NULL
+                                        ) AS GROUPED_RECORDS
+                                        GROUP BY ID
+                                    )
+                                    SELECT ID FROM GROUPED_RECORDS
+                                    UNION
+                                    SELECT ID FROM (
+                                        SELECT ID FROM {tempTableName}
+                                        WHERE {selectWhereClause}
+                                    ) AS SECOND_SELECT
+                                )
+                            );
+                           
+                            DROP TABLE IF EXISTS {tempTableName};";
 
-        Console.WriteLine($"Successfully moved {initialTempRecords} records from {tempTableName} into {tableName}");
+        using (SqliteCommand backupCommand = this.connection.CreateCommand())
+        {
+             backupCommand.CommandText = backupQuery;
+             backupCommand.ExecuteNonQuery();
+
+            int backupRecords = GetRecordCount(this.backupTableName);
+            if (backupRecords > 0)
+                Console.WriteLine($"Insert {backupRecords} backup records to {this.backupTableName} Table");
+        }
     }
 
     internal string InsertData(Dictionary<string, string> data)
