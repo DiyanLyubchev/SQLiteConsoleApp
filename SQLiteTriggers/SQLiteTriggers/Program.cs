@@ -4,8 +4,6 @@ using CsvHelper;
 using Microsoft.Data.Sqlite;
 using SQLiteTriggers;
 using System.Globalization;
-using System.Reflection.PortableExecutable;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 string tableName = "ABC";
 string tempTableName = "ABC_TEMP";
@@ -110,12 +108,10 @@ try
 
     if (seedRandomDate)
     {
-        ImportService.SeedRandomData(dbService, indxColumns, tableName, countToInsert);
+        ImportService.SeedRandomData(dbService, indxColumns, tableName, countToInsert, cleanChars, indexColumnName);
     }
-    else
+    else if (!isNeedToSyncTempandMainTables)
     {
-        string date = DateTime.Now.ToString("yyMMdd");
-        Dictionary<string, string> newData = [];
 
         using (StreamReader reader = new(pathToIportDataFile))
         {
@@ -132,12 +128,29 @@ try
                 if (csv.ReadHeader())
                 {
                     string[] headers = csv.HeaderRecord;
+
+                    while (csv.Read())
+                    {
+                        //dynamic obj = new ExpandoObject();
+                        //var objDictionary = (IDictionary<string, object>)obj;
+                        Dictionary<string, string> newData = [];
+
+                        foreach (var header in headers)
+                        {
+                            object value = csv.GetField(header);
+                            // value = string.IsNullOrEmpty(value.ToString()) ? DBNull.Value : value;
+
+                            newData.Add(header.ToUpper(), value?.ToString());
+                        }
+
+                        // newData = objDictionary.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString());
+
+                        if (newData.Count != 0)
+                            dbService.InsertData(newData, indxColumns, cleanChars, indexColumnName);
+                    }
                 }
             }
         }
-
-        if (newData.Count != 0)
-            dbService.InsertData(newData, indxColumns);
     }
 }
 catch (Exception ex)

@@ -228,39 +228,36 @@ internal class DbService
         Console.WriteLine($"Successfully moved {initialTempRecords} records from {tempTableName} into {tableName}");
     }
 
-    internal string InsertData(Dictionary<string, string> data, IEnumerable<string> indexColumns)
+    internal string InsertData(Dictionary<string, string> data,
+                               IEnumerable<string> indexColumns,
+                               List<char> cleanChars,
+                               string indexColumnName)
     {
+
+
+        List<string> orderColumnNames = this.GetTableColumns($"{this.tableName}")
+                                            .Where(column => indexColumns.Any(x => x.Equals(column, StringComparison.OrdinalIgnoreCase)))
+                                            .Select(column => column)
+                                            .ToList();
+        string key = string.Join("", orderColumnNames.Select(s => 
+                                                             data[s] != null 
+                                                             ? data[s].ToString().Trim() 
+                                                             : string.Empty));
+        string valueForSearching = cleanChars.Aggregate(key, (str, item) => str.Replace(item.ToString(), ""))
+                                             .ToUpper();
+
+        data.Add(indexColumnName, valueForSearching);
+        data.Remove("ID");
+
         string columns = string.Join(",", data.Keys);
         string parameterNames = string.Join(",", data.Keys.Select(x => $"@{x}"));
-
         var parameters = data.Select(x =>
-        {//TODO: Checking for null values and set parameters 
+        {
             var value = string.IsNullOrEmpty(x.Value) ? DBNull.Value : (object)x.Value;
             return new SqliteParameter($"@{x.Key}", value);
         }).ToArray();
 
-        string whereClause = string.Join(" AND ", indexColumns.Select(col =>
-        {
-            string columnCheck;
-            if (data.TryGetValue(col, out string value))
-            {
-                if (string.IsNullOrEmpty(value))
-                {
-                    columnCheck = $"{col} IS NULL";
-                }
-                else
-                {
-                    columnCheck = $"{col} = @{col}";
-                }
-            }
-            else
-            {
-                columnCheck = $"{col} IS NULL";
-            }
-
-            return columnCheck;
-        }));
-
+        string whereClause = $"{indexColumnName} = @{indexColumnName}";
         string date = DateTime.Now.ToString("yyMMdd");
 
         using SqliteCommand insertCommand = connection.CreateCommand();
@@ -298,9 +295,9 @@ internal class DbService
                                  SELECT CASE WHEN CHANGES() > 0 THEN LAST_INSERT_ROWID() ELSE 0 END;";
 
         command.Parameters.AddRange(parameters);
-        string upsertedId = $"U_{command.ExecuteScalar()}";
+        string idNum = $"U_{command.ExecuteScalar()}";
 
-        if (upsertedId == "U_0")
+        if (idNum == "U_0")
         {
             using SqliteCommand updateCommand = connection.CreateCommand();
             updateCommand.CommandText = $@"UPDATE {this.tableName} 
@@ -311,10 +308,10 @@ internal class DbService
             updateCommand.Parameters.AddRange(parameters);
             updateCommand.Parameters.AddWithValue("@Date", date);
 
-            upsertedId = updateCommand.ExecuteScalar().ToString();
+            idNum = updateCommand.ExecuteScalar().ToString();
         }
 
-        return upsertedId;
+        return idNum;
     }
 
     [Obsolete("The new one is created!")]
