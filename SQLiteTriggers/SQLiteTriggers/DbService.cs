@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.Sqlite;
+using System.Text;
 
 namespace SQLiteTriggers;
 
@@ -9,14 +10,32 @@ internal class DbService
     private readonly string backupTableName;
     private readonly string backupTrigger;
     private readonly string indexName;
+    private readonly string indexSetTableName = "INDEX_SET";
+    private readonly string characterSetTableName = "CHARACTER_SET";
+    private readonly string indexColumnName;
+    private readonly List<string> indexColumns = [];
+    private readonly List<char> cleanChars = [];
 
-    internal DbService(SqliteConnection connection, string tableName, string backupTableName)
+    internal DbService(SqliteConnection connection,
+                       string tableName,
+                       string backupTableName,
+                       List<string> indexColumns,
+                       string indexColumnName,
+                       List<char> cleanChars)
     {
         this.connection = connection;
         this.tableName = tableName;
         this.backupTableName = backupTableName;
         this.indexName = $"{tableName}_IDX";
         this.backupTrigger = $"{tableName}_BACKUP_DELETED";
+        this.indexColumns = indexColumns;
+        this.indexColumnName = indexColumnName;
+        this.cleanChars = cleanChars;
+
+        if (TableExists(tableName))
+        {
+            UpdateIndexSetWithIndexValueIfNeeded();
+        }
     }
 
     /// <summary>
@@ -37,6 +56,16 @@ internal class DbService
                     ID INTEGER PRIMARY KEY,
                              {string.Join(" TEXT,", tableColumns)} TEXT
                  ); 
+
+                  CREATE TABLE IF NOT EXISTS {this.indexSetTableName} (
+                        ID INTEGER PRIMARY KEY,
+                        INDEX_NAMES TEXT
+                  );
+
+                 CREATE TABLE IF NOT EXISTS {this.characterSetTableName} (
+                        ID INTEGER PRIMARY KEY,
+                        CLEAN_CHAR INTEGER
+                  );
              
                  CREATE TRIGGER IF NOT EXISTS {this.tableName}_POPULATE_ID
                  AFTER INSERT ON {this.tableName}
@@ -83,53 +112,176 @@ internal class DbService
         return reader.HasRows;
     }
 
+    internal void UpdateTableSchemaIfNeeded(List<string> tableColumns)
+    {
+        List<string> existingDbColumns = this.GetTableColumns(this.tableName);
+        List<string> columnsToAdd = tableColumns.Select(header => header.ToUpper())
+                                                .Except(existingDbColumns.Select(column => column.ToUpper()))
+                                                .ToList();
+
+        if (columnsToAdd.Count > 0)
+        {
+            AddColumnIfMissing(columnsToAdd, tableName);
+        }
+
+        List<string> existingBackUpDbColumns = GetTableColumns(backupTableName);
+        columnsToAdd = tableColumns.Select(header => header.ToUpper())
+                                   .Except(existingBackUpDbColumns.Select(column => column.ToUpper()))
+                                   .ToList();
+
+        if (columnsToAdd.Count > 0)
+        {
+            this.AddColumnIfMissing(columnsToAdd, backupTableName);
+            this.DropTrigger();
+            this.CreateBackupTrigger();
+        }
+    }
+
     internal void AddColumnIfMissing(List<string> columnsToAdd, string tableName)
     {
         Console.WriteLine($"Update table: {tableName} with columns: {string.Join(',', columnsToAdd)}");
+        StringBuilder query = new();
+        using SqliteCommand command = this.connection.CreateCommand();
         foreach (string column in columnsToAdd)
         {
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {column} TEXT";
-            command.ExecuteNonQuery();
+            query.AppendLine($"ALTER TABLE {tableName} ADD COLUMN {column} TEXT;");
         }
+        command.CommandText = query.ToString();
+        command.ExecuteNonQuery();
     }
 
     /// <summary>
     /// Index operations
     /// </summary>
-    internal void CreateIndex(List<string> indxColumns)
+    internal void CreateIndex(string indexColumnName)
     {
         using SqliteCommand command = connection.CreateCommand();
         string indexQuery = $@"CREATE UNIQUE INDEX IF NOT EXISTS {this.indexName} 
-                        ON {tableName} ({string.Join(",", indxColumns)});";
+                        ON {this.tableName} ({indexColumnName});";
 
         command.CommandText = indexQuery;
         command.ExecuteNonQuery();
     }
 
-    internal void DropIndex()
+    private List<string> GetIndexSet()
     {
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = $"DROP INDEX IF EXISTS {this.indexName}";
-        command.ExecuteNonQuery();
-    }
+        string indexValue = null;
 
-    internal List<string> GetIndexColumns()
-    {
-        List<string> columns = [];
-
-        using SqliteCommand command = connection.CreateCommand();
-
-        command.CommandText = $"PRAGMA index_info({this.indexName})";
-        using SqliteDataReader reader = command.ExecuteReader();
-
-        while (reader.Read())
+        using (SqliteCommand selectCommand = this.connection.CreateCommand())
         {
-            string columnName = reader["name"].ToString();
-            columns.Add(columnName);
+            selectCommand.CommandText = $"SELECT INDEX_NAMES FROM {this.indexSetTableName}";
+            object result = selectCommand.ExecuteScalar();
+            if (result != null)
+            {
+                indexValue = result.ToString();
+            }
         }
 
-        return columns;
+        return indexValue?.Split(',').Select(x => x.Trim()).ToList();
+    }
+
+    internal void InsertInitialIndexSet()
+    {
+        if (GetRecordCount(this.indexSetTableName) == 0)
+        {
+            using (SqliteCommand insertCommand = this.connection.CreateCommand())
+            {
+                insertCommand.Parameters.AddWithValue("@indexColumns", string.Join(", ", this.indexColumns));
+
+                insertCommand.CommandText = $@"INSERT INTO {this.indexSetTableName} (INDEX_NAMES) 
+                                               VALUES (@indexColumns)";
+
+                insertCommand.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private void UpdateInitialIndexSet()
+    {
+        using (SqliteCommand updateCommand = this.connection.CreateCommand())
+        {
+            updateCommand.Parameters.AddWithValue("@indexColumns", string.Join(", ", this.indexColumns));
+
+            updateCommand.CommandText = $@"UPDATE {this.indexSetTableName}
+                                               SET INDEX_NAMES = @indexColumns;";
+
+            updateCommand.ExecuteNonQuery();
+        }
+    }
+
+    private void UpdateIndexSetWithIndexValueIfNeeded()
+    {
+        List<string> indexSet = GetIndexSet();
+        List<string> moreIndexColumnfromExisting = this.indexColumns.Except(indexSet)
+                                                                    .ToList();
+
+        if (moreIndexColumnfromExisting.Count > 0)
+        {
+            this.UpdateInitialIndexSet();
+            List<string> orderColumnNames = this.GetTableColumns($"{this.tableName}")
+                              .Where(column => this.indexColumns.Any(x => x.Equals(column, StringComparison.OrdinalIgnoreCase)))
+                              .ToList();
+
+            UpdateIndexColumnWithNewIndexColumns(orderColumnNames);
+            CleanCharVromIndexColumn(cleanChars);
+
+            return;
+        }
+
+        List<string> lessIndexColumnfromExisting = indexSet.Except(this.indexColumns)
+                                                           .ToList();
+        if (lessIndexColumnfromExisting.Count > 0)
+        {
+            this.UpdateInitialIndexSet();
+            List<string> orderColumnNames = this.GetTableColumns($"{this.tableName}")
+                              .Where(column => this.indexColumns.Any(x => x.Equals(column, StringComparison.OrdinalIgnoreCase)))
+                              .ToList();
+
+            this.RemoveDuplicateRecords(orderColumnNames);
+
+            UpdateIndexColumnWithNewIndexColumns(orderColumnNames);
+
+            CleanCharVromIndexColumn(cleanChars);
+        }
+    }
+
+    private void UpdateIndexColumnWithNewIndexColumns(List<string> orderColumnNames)
+    {
+        string updateIndexColumnsQuery = string.Join(" || ", orderColumnNames.Select(c => $"COALESCE({c}, '')"));
+
+        string concatQuery = $@"UPDATE {this.tableName}
+                                       SET {this.indexColumnName} = UPPER({updateIndexColumnsQuery});";
+
+        using (SqliteCommand replaceCommand = this.connection.CreateCommand())
+        {
+            replaceCommand.CommandText = concatQuery;
+            replaceCommand.ExecuteNonQuery();
+        }
+    }
+
+    private void RemoveDuplicateRecords(List<string> orderColumnNames)
+    {
+        string updateIndexColumnsQuery = string.Join(" || ", orderColumnNames.Select(c => $"COALESCE({c}, '')"));
+        string removeDuplicatesQuery = $@"
+                   DELETE FROM {this.tableName}
+                   WHERE ROWID NOT IN (
+                       SELECT ROWID
+                       FROM (
+                           SELECT ROWID,
+                                  ROW_NUMBER() OVER(PARTITION BY {updateIndexColumnsQuery} ORDER BY ID DESC) AS row_num
+                           FROM {this.tableName}
+                       ) AS ranked
+                       WHERE row_num = 1
+                   );";
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = removeDuplicatesQuery;
+        int recordsDeleted = command.ExecuteNonQuery();
+
+        if (recordsDeleted > 0)
+        {
+            Console.WriteLine($"Moved {recordsDeleted} records to {this.backupTableName} Table");
+        }
     }
 
 
@@ -187,30 +339,6 @@ internal class DbService
         return 0;
     }
 
-    internal void RemoveDuplicateRecords(List<string> udatPriIndex)
-    {
-        string removeDuplicatesQuery = $@"
-             DELETE FROM {tableName}
-             WHERE ROWID NOT IN (
-                 SELECT ROWID
-                 FROM (
-                     SELECT ROWID,
-                            ROW_NUMBER() OVER(PARTITION BY {string.Join(", ", udatPriIndex)} ORDER BY ID_NUM DESC) AS row_num
-                     FROM {tableName}
-                 ) AS ranked
-                 WHERE row_num = 1
-             );";
-
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = removeDuplicatesQuery;
-        int recordsDeleted = command.ExecuteNonQuery();
-
-        if (recordsDeleted > 0)
-        {
-            Console.WriteLine($"Moved {recordsDeleted} records to {backupTableName} Table");
-        }
-    }
-
     internal void SyncMainTableWithTemp(string tempTableName)
     {
         int initialTempRecords = GetRecordCount(tempTableName);
@@ -228,20 +356,16 @@ internal class DbService
         Console.WriteLine($"Successfully moved {initialTempRecords} records from {tempTableName} into {tableName}");
     }
 
-    internal string InsertData(Dictionary<string, string> data,
-                               IEnumerable<string> indexColumns,
-                               List<char> cleanChars,
-                               string indexColumnName)
+    internal string InsertData(Dictionary<string, string> data)
     {
-
-
         List<string> orderColumnNames = this.GetTableColumns($"{this.tableName}")
                                             .Where(column => indexColumns.Any(x => x.Equals(column, StringComparison.OrdinalIgnoreCase)))
                                             .Select(column => column)
                                             .ToList();
-        string key = string.Join("", orderColumnNames.Select(s => 
-                                                             data[s] != null 
-                                                             ? data[s].ToString().Trim() 
+
+        string key = string.Join("", orderColumnNames.Select(s =>
+                                                             data[s] != null
+                                                             ? data[s].ToString().Trim()
                                                              : string.Empty));
         string valueForSearching = cleanChars.Aggregate(key, (str, item) => str.Replace(item.ToString(), ""))
                                              .ToUpper();
@@ -301,7 +425,7 @@ internal class DbService
         {
             using SqliteCommand updateCommand = connection.CreateCommand();
             updateCommand.CommandText = $@"UPDATE {this.tableName} 
-                                           SET active = @Date
+                                           SET ACTIVE = @Date
                                            WHERE {whereClause} 
                                            RETURNING ID_NUM;";
 
@@ -352,6 +476,102 @@ internal class DbService
         }
 
         command.ExecuteNonQuery();
+    }
+
+
+    //Clean char process
+    internal void InsertInitialCharacterSet()
+    {
+        int characterSetCount = this.GetRecordCount(this.characterSetTableName);
+        if (characterSetCount == 0
+         && this.cleanChars != null
+         && this.cleanChars.Count != 0)
+        {
+            InsertRecordsToCharacterSetTable(this.cleanChars);
+        }
+    }
+
+    private void InsertRecordsToCharacterSetTable(List<char> cleanChars)
+    {
+        using (SqliteCommand insertCommand = this.connection.CreateCommand())
+        {
+            string parameterPlaceholders = string.Join(", ", Enumerable.Range(0, cleanChars.Count)
+                                                 .Select(i => $"(@cleanChar{i})"));
+
+            insertCommand.CommandText = $@"INSERT INTO {this.characterSetTableName} (CLEAN_CHAR) 
+                                                          VALUES {parameterPlaceholders}";
+
+            for (int i = 0; i < cleanChars.Count; i++)
+            {
+                insertCommand.Parameters.AddWithValue($"@cleanChar{i}", (int)cleanChars[i]);
+            }
+
+            insertCommand.ExecuteNonQuery();
+        }
+    }
+
+    private List<char> GetCleanCharacters()
+    {
+        List<char> cleanCharacters = new();
+
+        using (SqliteCommand selectCommand = this.connection.CreateCommand())
+        {
+            selectCommand.CommandText = $"SELECT CLEAN_CHAR FROM {this.characterSetTableName}";
+            using (SqliteDataReader reader = selectCommand.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    int cleanCharAscii = reader.GetInt32(0);
+                    char cleanChar = (char)cleanCharAscii;
+                    cleanCharacters.Add(cleanChar);
+                }
+            }
+        }
+
+        return cleanCharacters;
+    }
+
+    internal void UpdateRecordsWithNewCharacterReplacementsIfNeeded()
+    {
+        if (this.cleanChars != null
+         && this.cleanChars.Count != 0)
+        {
+            List<char> cleanCharacters = this.GetCleanCharacters();
+            List<char> newCharacters = this.cleanChars.Except(cleanCharacters)
+                                                      .ToList();
+
+            if (newCharacters.Count > 0)
+            {
+                InsertRecordsToCharacterSetTable(newCharacters);
+
+                CleanCharVromIndexColumn(newCharacters);
+            }
+        }
+    }
+
+    private void CleanCharVromIndexColumn(List<char> cleanChars)
+    {
+        StringBuilder replaceQueryBuilder = new(this.indexColumnName);
+
+        foreach (char character in cleanChars)
+        {
+            string currentCharacter = character.ToString();
+
+            if (currentCharacter.Equals("'"))
+                currentCharacter = "''";
+
+            replaceQueryBuilder.Insert(0, $"REPLACE(");
+            replaceQueryBuilder.Append($", '{currentCharacter}', '')");
+        }
+
+        string updateQuery = $@"UPDATE {this.tableName}
+                              SET {this.indexColumnName} = UPPER({replaceQueryBuilder})";
+
+        using (SqliteCommand replaceCommand = this.connection.CreateCommand())
+        {
+            replaceCommand.CommandText = updateQuery;
+            replaceCommand.ExecuteNonQuery();
+        }
     }
 }
 

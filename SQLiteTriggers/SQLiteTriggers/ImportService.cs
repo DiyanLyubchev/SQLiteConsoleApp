@@ -123,10 +123,8 @@ internal class ImportService
     }
 
     public static void SeedRandomData(DbService dbService,
-                                      List<string> indxColumns,
                                       string tableName,
                                       int countToInsert,
-                                      List<char> cleanChars,
                                       string indexColumnName)
     {
         List<string> tableColumns = dbService.GetTableColumns(tableName);
@@ -139,13 +137,16 @@ internal class ImportService
 
             foreach (string column in tableColumns)
             {
-                if (column.Equals("ACTIVE", StringComparison.OrdinalIgnoreCase))
+                if (column.Equals("ENTRY", StringComparison.OrdinalIgnoreCase) 
+                 || column.Equals("ACTIVE", StringComparison.OrdinalIgnoreCase))
                     newData.Add(column, date);
                 else
                     newData.Add(column, Guid.NewGuid().ToString());
             }
 
-            dbService.InsertData(newData, indxColumns, cleanChars, indexColumnName);
+            newData.Remove(indexColumnName);
+
+            dbService.InsertData(newData);
         }
 
         Console.WriteLine($"Insert: {dbService.GetRecordCount(tableName) - initialRecords} records into table: {tableName}");

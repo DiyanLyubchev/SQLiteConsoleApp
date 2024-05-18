@@ -10,27 +10,20 @@ string tempTableName = "ABC_TEMP";
 string backupTableName = $"BACKUP_{tableName}";
 bool isNeedToSyncTempandMainTables = false;
 string indexColumnName = "INDEX_COLUMN";
-List<char> cleanChars = new() { '^', ' ' };
+List<char> cleanChars = ['^', ' ', '-'];
 
 SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
 //Variables for testing
 bool seedRandomDate = false;
 int countToInsert = 10;
 bool testColumn = false;
-bool testIndex = false;
 
-List<string> tableColumns = ["ID_NUM", "ACTIVE", "MODEL", "BRAND"];
+List<string> tableColumns = ["ID_NUM", "ENTRY", "ACTIVE", "MODEL", "BRAND"];
 List<string> indxColumns = ["MODEL", "BRAND"];
 
 if (testColumn)
 {
-    tableColumns = ["ID_NUM", "ACTIVE", "MODEL", "BRAND", "PESHO"];
-}
-
-if (testIndex)
-{
-    indxColumns = ["MODEL", "BRAND", "PESHO"];
-    //indxColumns = ["MODEL"];
+    tableColumns = ["ID_NUM", "ENTRY", "ACTIVE", "MODEL", "BRAND", "PESHO"];
 }
 
 string currentDirectory = Directory.GetCurrentDirectory();
@@ -51,7 +44,12 @@ connection.Open();
 
 ValidateFile(pathToDbFile);
 
-DbService dbService = new(connection, tableName, backupTableName);
+DbService dbService = new(connection,
+                          tableName,
+                          backupTableName,
+                          indxColumns,
+                          indexColumnName,
+                          cleanChars);
 
 if (!dbService.TableExists(tempTableName) && !dbService.TableExists(tableName))
 {
@@ -69,46 +67,20 @@ using SqliteTransaction transaction = connection.BeginTransaction();
 try
 {
     dbService.CreateInitialTabels(tempTableName);
-    dbService.CreateIndex(indxColumns);
+    dbService.CreateIndex(indexColumnName);
     dbService.CreateBackupTrigger();
+    dbService.InsertInitialIndexSet();
+    dbService.InsertInitialCharacterSet();
+    dbService.UpdateRecordsWithNewCharacterReplacementsIfNeeded();
 
     if (isNeedToSyncTempandMainTables)
         dbService.SyncMainTableWithTemp(tempTableName);
 
-    List<string> existingDbColumns = dbService.GetTableColumns(tableName);
-    List<string> columnsToAdd = tableColumns.Except(existingDbColumns).ToList();
-
-    if (columnsToAdd.Count > 0)
-    {
-        dbService.AddColumnIfMissing(columnsToAdd, tableName);
-    }
-
-    List<string> existingBackUpDbColumns = dbService.GetTableColumns(backupTableName);
-    columnsToAdd = tableColumns.Except(existingBackUpDbColumns).ToList();
-
-    if (columnsToAdd.Count > 0)
-    {
-        dbService.AddColumnIfMissing(columnsToAdd, backupTableName);
-        dbService.DropTrigger();
-        dbService.CreateBackupTrigger();
-    }
-
-    int indexColumnsCount = dbService.GetIndexColumns().Count;
-    if (indexColumnsCount != indxColumns.Count)
-    {
-        Console.WriteLine($"Update index");
-        if (indexColumnsCount > indxColumns.Count)
-        {
-            dbService.RemoveDuplicateRecords(indxColumns);
-        }
-
-        dbService.DropIndex();
-        dbService.CreateIndex(indxColumns);
-    }
+    dbService.UpdateTableSchemaIfNeeded(tableColumns);
 
     if (seedRandomDate)
     {
-        ImportService.SeedRandomData(dbService, indxColumns, tableName, countToInsert, cleanChars, indexColumnName);
+        ImportService.SeedRandomData(dbService, tableName, countToInsert, indexColumnName);
     }
     else if (!isNeedToSyncTempandMainTables)
     {
@@ -146,7 +118,7 @@ try
                         // newData = objDictionary.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString());
 
                         if (newData.Count != 0)
-                            dbService.InsertData(newData, indxColumns, cleanChars, indexColumnName);
+                            dbService.InsertData(newData);
                     }
                 }
             }
