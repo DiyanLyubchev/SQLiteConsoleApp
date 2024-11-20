@@ -4,12 +4,13 @@ using System.Data.SQLite;
 
 namespace SqliteWithDapper.Repository
 {
-    internal class DbRepository
+    public class DbRepository
     {
         private readonly SQLiteConnection connection;
-        public DbRepository(string connectionString)
+
+        public DbRepository(SQLiteConnection connection)
         {
-            this.connection = GetConnection(connectionString);
+            this.connection = connection;
             SetupDatabase();
         }
 
@@ -24,7 +25,7 @@ namespace SqliteWithDapper.Repository
             {
                 item.PersonId = (int)personId;
             }
-           
+
             var insertAddressQuery = "INSERT INTO Addresses (City, PostCode, PersonId) VALUES (@City, @PostCode, @PersonId)";
             connection.Execute(insertAddressQuery, addresses);
         }
@@ -34,6 +35,18 @@ namespace SqliteWithDapper.Repository
 
         public IEnumerable<Address> GetAllAddresses()
            => this.connection.Query<Address>("SELECT * FROM Addresses").ToList();
+
+        public (List<Person> people, List<Address> addresses) GetAllPeopleAndAddresses()
+        {
+            string sql = @"SELECT * FROM PERSON;
+                        SELECT * FROM Addresses;";
+
+            using var multi =  this.connection.QueryMultiple(sql);
+            List<Person> people = multi.Read<Person>().ToList();
+            List<Address> addresses = multi.Read<Address>().ToList();
+
+            return (people,addresses);
+        }
 
         public void Update(int id, string newName, int newAge)
         {
@@ -79,13 +92,6 @@ namespace SqliteWithDapper.Repository
         {
             this.connection.Close();
             this.connection.Dispose();
-        }
-
-        private static SQLiteConnection GetConnection(string connectionString)
-        {
-            SQLiteConnection connection = new($"Data Source={connectionString};");
-            connection.Open();
-            return connection;
         }
 
         private void SetupDatabase()

@@ -1,13 +1,10 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using SqliteWithDapper.Helper;
 using SqliteWithDapper.Models;
 using SqliteWithDapper.Repository;
 
-string currentDirectory = Directory.GetCurrentDirectory();
-string pathToDbFile = Path.Combine(currentDirectory, "..\\..\\..\\Dapper.db");
-
-DbRepository repository = new(pathToDbFile);
-
+DbRepository repository = new(new DbHelper().GetPhysicalDbConnection());
 repository.DeleteAll();
 
 List<Person> people = repository.GetAll().ToList();
