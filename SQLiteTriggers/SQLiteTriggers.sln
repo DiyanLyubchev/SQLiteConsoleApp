@@ -5,6 +5,8 @@ VisualStudioVersion = 17.9.34701.34
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SQLiteTriggers", "SQLiteTriggers\SQLiteTriggers.csproj", "{3F9AD4B8-F250-4388-BAAC-094F4A7C7C84}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqliteWithDapper", "SqliteWithDapper\SqliteWithDapper.csproj", "{742C6DBF-776B-4B8F-81C2-9656286316A1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{3F9AD4B8-F250-4388-BAAC-094F4A7C7C84}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3F9AD4B8-F250-4388-BAAC-094F4A7C7C84}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3F9AD4B8-F250-4388-BAAC-094F4A7C7C84}.Release|Any CPU.Build.0 = Release|Any CPU
+		{742C6DBF-776B-4B8F-81C2-9656286316A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{742C6DBF-776B-4B8F-81C2-9656286316A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{742C6DBF-776B-4B8F-81C2-9656286316A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{742C6DBF-776B-4B8F-81C2-9656286316A1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
