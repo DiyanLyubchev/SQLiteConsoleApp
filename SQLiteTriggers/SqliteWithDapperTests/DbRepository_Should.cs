@@ -4,35 +4,34 @@ using SqliteWithDapper.Repository;
 
 namespace SqliteWithDapperTests
 {
+    [TestFixture]
     public class DbRepository_Should
     {
-        private IDbHelper dbHelper;
+        private DbRepository repository;
 
-        [SetUp]
+        [OneTimeSetUp]
         public void Setup()
         {
-            dbHelper = new DbHelper();
+            this.repository = new(new DbHelper().GetInMemoryDbConnection());
         }
 
         [Test]
         public void Constructor_ShouldNotBeNUll()
         {
-            DbRepository dbRepository = new(dbHelper.GetInMemoryDbConnection());
-            Assert.That(dbRepository, Is.Not.Null);
+            Assert.That(repository, Is.Not.Null);
         }
 
         [Test]
         public void Insert_ShouldInsertCorrect()
         {
-            DbRepository repository = new(dbHelper.GetInMemoryDbConnection());
-            Insert(repository);
+            Insert();
 
-            IEnumerable<Person> people = repository.GetAll();
-            IEnumerable<Address> addresses = repository.GetAllAddresses();
+            IEnumerable<Person> people = this.repository.GetAll();
+            IEnumerable<Address> addresses = this.repository.GetAllAddresses();
 
             Assert.Multiple(() =>
             {
-                Assert.That(repository, Is.Not.Null);
+                Assert.That(this.repository, Is.Not.Null);
                 Assert.That(people, Is.Not.Null);
                 Assert.That(people.Count, Does.Not.Zero);
                 Assert.That(addresses, Is.Not.Null);
@@ -43,24 +42,23 @@ namespace SqliteWithDapperTests
         [Test]
         public void Delete_ShouldDeleteCascadeCorrect()
         {
-            DbRepository repository = new(dbHelper.GetInMemoryDbConnection());
-            Insert(repository);
+            Insert();
 
-            IEnumerable<Person> people = repository.GetAll();
-            IEnumerable<Address> addresses = repository.GetAllAddresses();
+            IEnumerable<Person> people = this.repository.GetAll();
+            IEnumerable<Address> addresses = this.repository.GetAllAddresses();
 
             Assert.Multiple(() =>
             {
-                Assert.That(repository, Is.Not.Null);
+                Assert.That(this.repository, Is.Not.Null);
                 Assert.That(people, Is.Not.Null);
                 Assert.That(people.Count, Is.EqualTo(1));
                 Assert.That(addresses, Is.Not.Null);
                 Assert.That(addresses.Count, Is.EqualTo(1));
             });
 
-            repository.DeleteAll();
-            people = repository.GetAll();
-            addresses = repository.GetAllAddresses();
+            this.repository.DeleteAll();
+            people = this.repository.GetAll();
+            addresses = this.repository.GetAllAddresses();
 
             Assert.Multiple(() =>
             {
@@ -72,10 +70,9 @@ namespace SqliteWithDapperTests
         [Test]
         public void GetPeopleWithAddresses_ShouldNotBeNUll()
         {
-            DbRepository repository = new(dbHelper.GetInMemoryDbConnection());
-            Insert(repository);
+            Insert();
 
-            List<Person> people = repository.GetPeopleWithAddresses();
+            List<Person> people = this.repository.GetPeopleWithAddresses();
 
             Assert.Multiple(() =>
             {
@@ -83,7 +80,7 @@ namespace SqliteWithDapperTests
                 Assert.That(people.Select(x => x.Addresses), Is.Not.Null);
             });
 
-            IEnumerable<Person> peopleWithoutIncludeAddreses = repository.GetAll();
+            IEnumerable<Person> peopleWithoutIncludeAddreses = this.repository.GetAll();
 
             Assert.That(peopleWithoutIncludeAddreses.First().Addresses, Is.Empty);
         }
@@ -91,10 +88,9 @@ namespace SqliteWithDapperTests
         [Test]
         public void GetAllPeopleAndAddresses_ReturnTuple()
         {
-            DbRepository repository = new(dbHelper.GetInMemoryDbConnection());
-            Insert(repository);
+            Insert();
 
-            (List<Person> people, List<Address> addresses) = repository.GetAllPeopleAndAddresses();
+            (List<Person> people, List<Address> addresses) = this.repository.GetAllPeopleAndAddresses();
 
             Assert.Multiple(() =>
             {
@@ -102,14 +98,14 @@ namespace SqliteWithDapperTests
                 Assert.That(addresses, Does.Not.Zero);
             });
 
-            IEnumerable<Person> peopleWithoutIncludeAddreses = repository.GetAll();
+            IEnumerable<Person> peopleWithoutIncludeAddreses = this.repository.GetAll();
 
             Assert.That(peopleWithoutIncludeAddreses.First().Addresses, Is.Empty);
         }
 
-        private static void Insert(DbRepository repository)
+        private void Insert()
         {
-            repository.Insert(
+            this.repository.Insert(
                          new Person
                          {
                              Name = $"Pesho {Guid.NewGuid()}",
