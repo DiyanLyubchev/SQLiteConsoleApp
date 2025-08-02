@@ -1,6 +1,7 @@
 using SqliteWithDapper.Helper;
 using SqliteWithDapper.Models;
 using SqliteWithDapper.Repository;
+using System.Data;
 
 namespace SqliteWithDapperTests
 {
@@ -98,9 +99,31 @@ namespace SqliteWithDapperTests
                 Assert.That(addresses, Does.Not.Zero);
             });
 
-            IEnumerable<Person> peopleWithoutIncludeAddreses = this.repository.GetAll();
+            IEnumerable<Person> peopleWithoutIncludeAddReses = this.repository.GetAll();
 
-            Assert.That(peopleWithoutIncludeAddreses.First().Addresses, Is.Empty);
+            Assert.That(peopleWithoutIncludeAddReses.First().Addresses, Is.Empty);
+        }
+
+        [Test]
+        public void Update_ShouldChangePersonData()
+        {
+            Insert();
+            var person = repository.GetAll().First();
+            repository.Update(person.Id, "UpdatedName", 99);
+
+            var updatedPerson = repository.GetAll().First();
+            Assert.Multiple(() =>
+            {
+                Assert.That(updatedPerson.Name, Is.EqualTo("UpdatedName"));
+                Assert.That(updatedPerson.Age, Is.EqualTo(99));
+            });
+        }
+
+        [Test]
+        public void Insert_ShouldThrowDataException_OnInvalidData()
+        {
+            var invalidPerson = new Person { Name = null, Age = 30 }; 
+            Assert.Throws<DataException>(() => repository.Insert(invalidPerson));
         }
 
         private void Insert()

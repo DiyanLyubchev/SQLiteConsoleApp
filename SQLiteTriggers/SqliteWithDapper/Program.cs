@@ -35,7 +35,7 @@ Console.WriteLine($"After Insert Addresses: {addresses.Count}");
 
 List<Person> peopleWithAddres = repository.GetPeopleWithAddresses();
 
-repository.CloseConnection();
+repository.Dispose();
 
 static int GetRandomAge()
     => new Random().Next(15, 45);
